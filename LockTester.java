@@ -17,6 +17,8 @@ public class LockTester {
                 lock = new CircToken(comm,0);
             if (args[3].equals("CompleteNetwork"))
                 lock = new CompleteObject(comm,0);
+            if (args[3].equals("DistributedQueue"))
+                lock = new CompleteObject(comm,0);
             for (int i = 0; i < numProc; i++)
                if (i != myId)
                   (new ListenerThread(i, (MsgHandler)lock)).start();
