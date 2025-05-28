@@ -24,7 +24,7 @@ public class DistributedQueue extends Process implements Lock {
         if(!object_present){
             sendMsg(parent, "request", String.valueOf(myId));
             parent = myId;
-            myWait();
+            while(!object_present) myWait();
         }
     }
 
