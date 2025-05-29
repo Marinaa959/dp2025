@@ -1,0 +1,188 @@
+import java.util.LinkedList;
+import java.util.Queue;
+
+public class RaymondAlgorithm extends Process implements MobileObjectManager {
+
+    public int parent_for_object;
+    public Queue<Integer> request_queue;
+    public boolean interested_in_object;
+    public boolean holding_object;
+
+    public RaymondAlgorithm(Linker initComm, int initial_parent_for_object, boolean holds_object_initially) {
+        super(initComm);
+        this.parent_for_object = initial_parent_for_object;
+        this.request_queue = new LinkedList<>();
+        this.interested_in_object = false;
+        this.holding_object = holds_object_initially;
+
+        if (this.holding_object) {
+            this.parent_for_object = myId;
+        }
+    }
+
+    public synchronized void acquire_object() {
+        Util.println("RaymondAlg P" + myId + " POZIVA acquire_object(). Stanje: drziObj=" + holding_object + ", roditeljObj=P" + parent_for_object + ", red: " + request_queue.toString());
+        interested_in_object = true;
+
+        if (!holding_object) {
+            if (!request_queue.contains(myId)) {
+                request_queue.add(myId);
+                Util.println("RaymondAlg P" + myId + " dodao sebe (ID:" + myId + ") u red. Red sada: " + request_queue.toString());
+            }
+
+            if (request_queue.peek() != null && request_queue.peek() == myId && parent_for_object != myId) {
+                Util.println("RaymondAlg P" + myId + " (acquire) šalje " + Symbols.REQUEST_OBJ_TAG + "(za P" + myId + ") roditelju P" + parent_for_object);
+                sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(myId));
+            }
+        } else {
+            if (!request_queue.contains(myId)) {
+                request_queue.add(myId);
+                Util.println("RaymondAlg P" + myId + " (već držim objekt) dodao sebe (ID:" + myId + ") u red. Red sada: " + request_queue.toString());
+            }
+            Util.println("RaymondAlg P" + myId + " već drži objekt (u acquire_object). Čekam da dođem na red ako je potrebno.");
+        }
+
+        while (!holding_object || (request_queue.peek() != null && request_queue.peek() != myId && interested_in_object)) {
+            if (!holding_object && request_queue.peek() != null && request_queue.peek() == myId && parent_for_object != myId) {
+                Util.println("RaymondAlg P" + myId + " (u wait petlji) je na čelu (P" + request_queue.peek() + "), ali nema objekt. Ponovno šalje " + Symbols.REQUEST_OBJ_TAG + "(za P" + myId + ") roditelju P" + parent_for_object);
+                sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(myId));
+            }
+            Util.println("RaymondAlg P" + myId + " (acquire) čeka. drziObj=" + holding_object + ", zainteresiran="+interested_in_object+", red.peek="+(request_queue.peek()==null?"null":("P"+request_queue.peek())) + ", myId=P"+myId);
+            myWait();
+        }
+        
+        if (holding_object && request_queue.peek() != null && request_queue.peek() == myId){
+            request_queue.poll();
+            Util.println("RaymondAlg P" + myId + " (acquire) uklonio svoj zahtjev (P" + myId + ") s čela reda.");
+        }
+        Util.println("RaymondAlg P" + myId + " DOBIO OBJEKT. Red sada: " + request_queue.toString());
+    }
+
+    public synchronized void release_object() {
+        Util.println("RaymondAlg P" + myId + " POZIVA release_object(). Stanje: drziObj=" + holding_object + ", zainteresiran=" + interested_in_object + ", Trenutni red: " + request_queue.toString());
+        interested_in_object = false; 
+
+        if (holding_object && !request_queue.isEmpty()) { 
+            int next_holder_id_to_serve = request_queue.poll(); 
+
+            if (next_holder_id_to_serve == myId) {
+                Util.println("RaymondAlg P" + myId + " (release) je sljedeći u svom redu (P" + myId + "). Zadržava objekt i ponovno postaje zainteresiran.");
+                interested_in_object = true; 
+            } else {
+                Util.println("RaymondAlg P" + myId + " (release) šalje " + Symbols.OBJECT_OBJ_TAG + "(poslao:P" + myId + ") procesu P" + next_holder_id_to_serve + ". Moj novi roditelj_za_objekt: P" + next_holder_id_to_serve);
+                sendMsg(next_holder_id_to_serve, Symbols.OBJECT_OBJ_TAG, String.valueOf(myId)); 
+                parent_for_object = next_holder_id_to_serve;
+                holding_object = false;
+            }
+
+            if (!holding_object && !request_queue.isEmpty()) { 
+                int next_requester_in_my_queue = request_queue.peek();
+                if (parent_for_object != next_requester_in_my_queue) {
+                    Util.println("RaymondAlg P" + myId + " (release, proxy) ima još zahtjeva. Šalje " + Symbols.REQUEST_OBJ_TAG + "(za P" + next_requester_in_my_queue +") novom roditelju P" + parent_for_object);
+                    sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(next_requester_in_my_queue));
+                } else {
+                     Util.println("RaymondAlg P" + myId + " (release, proxy) ima još zahtjeva, ali sljedeći (P" + next_requester_in_my_queue + ") je moj novi roditelj (P" + parent_for_object + "). Ne šaljem REQUEST.");
+                }
+            }
+        } else if (holding_object && request_queue.isEmpty()) {
+            Util.println("RaymondAlg P" + myId + " (release) nema kome poslati objekt (red prazan), zadržava ga.");
+        } else if (!holding_object) {
+             Util.println("RaymondAlg P" + myId + " pozvao release_object, ali ne drži objekt. Red: " + request_queue.toString());
+             if (!request_queue.isEmpty() && parent_for_object != myId) {
+                int next_requester_in_my_queue = request_queue.peek();
+                 if (parent_for_object != next_requester_in_my_queue && next_requester_in_my_queue != myId) {
+                    Util.println("RaymondAlg P" + myId + " (release, ne držim, proxy) ima zahtjeve. Šalje " + Symbols.REQUEST_OBJ_TAG + "(za P" + next_requester_in_my_queue +") roditelju P" + parent_for_object);
+                    sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(next_requester_in_my_queue));
+                 }
+             }
+        }
+        notifyAll();
+    }
+
+    public synchronized void handleMsg(Msg m, int srcId, String tag) {
+        if (tag.equals(Symbols.REQUEST_OBJ_TAG)) {
+            int original_requester_id = m.getMessageInt();
+            Util.println("RaymondAlg P" + myId + " primio " + Symbols.REQUEST_OBJ_TAG + "(za P" + original_requester_id + ") od P" + srcId + ". Stanje: drziObj=" + holding_object + ", zainteresiran=" + interested_in_object + ", roditeljObj=P" + parent_for_object);
+
+            if (!request_queue.contains(original_requester_id)) {
+                 request_queue.add(original_requester_id);
+            }
+            Util.println("RaymondAlg P" + myId + " stanje reda nakon dodavanja/provjere: " + request_queue.toString());
+
+            if (holding_object) { 
+                if (!interested_in_object) { 
+                    Integer next_in_queue_id_obj = request_queue.peek();
+                    if (next_in_queue_id_obj != null) { 
+                        int next_in_queue_id_to_serve = next_in_queue_id_obj;
+                        
+                        if (next_in_queue_id_to_serve == myId) { 
+                             Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ) ja (P" + myId + ") sam sljedeći u redu. Zadržavam objekt i postajem zainteresiran.");
+                             request_queue.poll(); 
+                             interested_in_object = true; 
+                        } else {
+                            request_queue.poll(); 
+                            Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ) posjeduje objekt i ne treba ga. Šalje " + Symbols.OBJECT_OBJ_TAG + "(poslao:P" + myId + ") procesu P" + next_in_queue_id_to_serve);
+                            sendMsg(next_in_queue_id_to_serve, Symbols.OBJECT_OBJ_TAG, String.valueOf(myId));
+                            parent_for_object = next_in_queue_id_to_serve;
+                            holding_object = false;
+                        }
+
+                        if (!holding_object && !request_queue.isEmpty()) { 
+                            int next_requester_in_my_q = request_queue.peek();
+                            if (parent_for_object != next_requester_in_my_q) { 
+                                Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ, nakon slanja obj) ima još zahtjeva. Šalje " + Symbols.REQUEST_OBJ_TAG + "(za P" + next_requester_in_my_q + ") novom roditelju P" + parent_for_object);
+                                sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(next_requester_in_my_q));
+                            }
+                        }
+                    } else {
+                        Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ) drži objekt, nije zainteresiran, ali red je bio prazan prije dodavanja. Zahtjev (P"+original_requester_id+") je sada u redu.");
+                    }
+                } else { 
+                     Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ) posjeduje objekt i zainteresiran je. Zahtjev (P" + original_requester_id + ") od P" + srcId + " je stavljen u red.");
+                }
+            } else { 
+                if (request_queue.peek() != null && request_queue.peek() == original_requester_id &&
+                    original_requester_id != myId && 
+                    parent_for_object != original_requester_id &&
+                    parent_for_object != myId) {
+                        Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ) ne posjeduje objekt. Prosljeđuje " + Symbols.REQUEST_OBJ_TAG + "(za P" + original_requester_id + ") roditelju P" + parent_for_object);
+                        sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(original_requester_id));
+                } else {
+                     Util.println("RaymondAlg P" + myId + " (handle REQUEST_OBJ) ne posjeduje objekt. Zahtjev (P" + original_requester_id + ") od P" + srcId + " je u redu, ali uvjeti za prosljeđivanje NISU ZADOVOLJENI.");
+                }
+            }
+
+        } else if (tag.equals(Symbols.OBJECT_OBJ_TAG)) {
+            Util.println("RaymondAlg P" + myId + " primio " + Symbols.OBJECT_OBJ_TAG + " od P" + srcId + ". Moj red: " + request_queue.toString());
+            
+            Integer intended_holder_id_obj = request_queue.peek(); 
+
+            if (intended_holder_id_obj != null && intended_holder_id_obj == myId) {
+                Util.println("RaymondAlg P" + myId + " (handle OBJECT_OBJ) objekt je za mene (P" + myId + "). Postajem vlasnik.");
+                holding_object = true;
+                parent_for_object = myId;
+            } else if (intended_holder_id_obj != null && intended_holder_id_obj != myId) {
+                int next_holder_to_serve = request_queue.poll();
+                Util.println("RaymondAlg P" + myId + " (handle OBJECT_OBJ) objekt je za P" + next_holder_to_serve + ". Prosljeđujem. Moj novi roditelj_za_objekt: P" + next_holder_to_serve);
+                sendMsg(next_holder_to_serve, Symbols.OBJECT_OBJ_TAG, String.valueOf(myId));
+                parent_for_object = next_holder_to_serve;
+                holding_object = false;
+
+                if (!request_queue.isEmpty()) {
+                    int next_requester_in_my_q = request_queue.peek();
+                     if (parent_for_object != next_requester_in_my_q) {
+                        Util.println("RaymondAlg P" + myId + " (handle OBJECT_OBJ, nakon prosljeđivanja) ima još zahtjeva. Šalje " + Symbols.REQUEST_OBJ_TAG + "(za P" + next_requester_in_my_q + ") novom roditelju P" + parent_for_object);
+                        sendMsg(parent_for_object, Symbols.REQUEST_OBJ_TAG, String.valueOf(next_requester_in_my_q));
+                    }
+                }
+            } else {
+                Util.println("RaymondAlg P" + myId + " (handle OBJECT_OBJ) primio objekt, ali moj red je (bio) prazan. Postajem vlasnik.");
+                holding_object = true;
+                parent_for_object = myId;
+            }
+        } else {
+            Util.println("RaymondAlgorithm P" + myId + " primio poruku s neobrađenom oznakom: TAG=" + tag + " OD P" + srcId);
+        }
+        notifyAll();
+    }
+}
